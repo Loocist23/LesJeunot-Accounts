@@ -1,87 +1,68 @@
-from werkzeug.exceptions import HTTPException
-from flask_jwt_extended import JWTManager
-from flask import Flask, Response
 from datetime import timedelta
-from os import urandom, getenv
-from dotenv import load_dotenv
-from sqlite3 import connect
 
-from routes.Index import bp as index
-from routes.v1.Users import bp as v1_users
-from routes.v1.Tickets import bp as v1_tickets
+from flask import Flask, Response
+from flask_jwt_extended import JWTManager
+from flask_cors import CORS
+from werkzeug.exceptions import HTTPException
 
-
-load_dotenv('.env')
-HOST = str(getenv('HOST'))
-PORT = int(str(getenv('PORT')))
+from config import settings
+from database import Base, engine
 
 
-app = Flask(__name__)
-app.config['SECRET_KEY'] = urandom(64)
-app.config['JWT_SECRET_KEY'] = urandom(64)
-app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=6).seconds
-app.config['JWT_REFRESH_TOKEN_EXPIRES'] = timedelta(days=7).seconds
-app.config['JWT_ENCODE_ISSUER'] = ''
-jwt = JWTManager(app)
-
-
-con = connect('database.sqlite')
-cur = con.cursor()
-query = """
-    CREATE TABLE IF NOT EXISTS users (
-        uuid VARCHAR(32) PRIMARY KEY NOT NULL,
-        lastname LONGTEXT NOT NULL,
-        firstname LONGTEXT NOT NULL,
-        age UNSIGNED INT NOT NULL,
-        email LONGTEXT NOT NULL,
-        email_hash LONGTEXT NOT NULL,
-        password LONGTEXT NOT NULL,
-        role VARCHAR(5) NOT NULL
+def create_app() -> Flask:
+    """Application factory with sane defaults and registrations."""
+    app = Flask(__name__)
+    app.config.update(
+        SECRET_KEY=settings.secret_key,
+        JWT_SECRET_KEY=settings.jwt_secret_key,
+        JWT_ACCESS_TOKEN_EXPIRES=timedelta(hours=6),
+        JWT_REFRESH_TOKEN_EXPIRES=timedelta(days=7),
+        JWT_ENCODE_ISSUER=settings.jwt_issuer,
     )
-"""
-cur.execute(query)
-query = """
-    CREATE TABLE IF NOT EXISTS tickets (
-        uuid PRIMARY KEY NOT NULL,
-        showing LONGTEXT NOT NULL,
-        user VARCHAR(32) NOT NULL,
-        FOREIGN KEY(user) REFERENCES users(uuid)
-    )
-"""
-cur.execute(query)
-con.commit()
+    JWTManager(app)
+    origins = [
+        origin.strip()
+        for origin in settings.cors_origins.split(",")
+        if origin.strip()
+    ]
+    CORS(app, resources={r"/*": {"origins": origins or "*"}})
+
+    Base.metadata.create_all(bind=engine)
+
+    from routes.Index import bp as index
+    from routes.v1.Tickets import bp as v1_tickets
+    from routes.v1.Users import bp as v1_users
+
+    app.register_blueprint(index, url_prefix="/")
+    app.register_blueprint(v1_users, url_prefix="/v1/user")
+    app.register_blueprint(v1_tickets, url_prefix="/v1/ticket")
+
+    @app.errorhandler(401)
+    def error_handler_401(error: HTTPException):
+        return {
+            "status": error.code,
+            "error": error.name,
+            "message": "Authorization token required.",
+        }, 401
+
+    @app.errorhandler(404)
+    def error_handler_404(error: HTTPException):
+        return {
+            "status": error.code,
+            "error": error.name,
+            "message": "The requested URL was not found.",
+        }, 404
+
+    @app.after_request
+    def after_request(response: Response):
+        response.headers.update({"Content-Type": "application/json"})
+        return response
+
+    return app
 
 
-app.register_blueprint(index, url_prefix='/')
-app.register_blueprint(v1_users, url_prefix='/v1/user')
-app.register_blueprint(v1_tickets, url_prefix='/v1/ticket')
+app = create_app()
 
 
-@app.errorhandler(401)
-def errorHandler401(error: HTTPException):
-    return {
-        'status': error.code,
-        'error': error.name,
-        'message': 'Authorization token required.'
-    }, 401
-
-@app.errorhandler(404)
-def errorHandler404(error: HTTPException):
-    return {
-        'status': error.code,
-        'error': error.name,
-        'message': 'The requested URL was not found.'
-    }, 404
-
-@app.after_request
-def afterRequest(response: Response):
-    response.headers.update({'Content-Type': 'application/json'})
-    return response
-
-
-if __name__ == '__main__':
-    app.run(
-        host = HOST,
-        port = PORT,
-        debug = False
-    )
+if __name__ == "__main__":
+    app.run(host=settings.host, port=settings.port, debug=False)

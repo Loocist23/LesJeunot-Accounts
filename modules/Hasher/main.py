@@ -29,7 +29,7 @@ class Hasher:
         :param str password: Password to hash
         :return str: Hashed password
         """
-        return self.argon.hash(password.encode())
+        return self.argon.hash(password)
     
     def verify(self, hash: str, password: str) -> bool:
         """Verify if the hash and password corresponds.
@@ -38,7 +38,7 @@ class Hasher:
         :param str password: The password to check
         :return bool: True if they correspond, else False
         """
-        try: isValid = self.argon.verify(hash, password.encode())
+        try: isValid = self.argon.verify(hash, password)
         except: isValid = False
         return isValid
     

@@ -44,17 +44,32 @@ pip install -r requirements.txt
 
 ```
 # Host IP and Port to listen on
-HOST = "0.0.0.0"
-PORT = 8080
+HOST=0.0.0.0
+PORT=8080
 
-# Encryption key for the users' data
-KEY = "<32 bytes Encoded in base64>"
+# Flask secrets (defaults are randomly generated at boot if omitted)
+# SECRET_KEY=<random hex string>
+# JWT_SECRET_KEY=<random hex string>
+# JWT_ISSUER=lesjeunot.accounts
+
+# Comma-separated list of allowed origins (default: "*")
+CORS_ORIGINS=http://localhost:8080
+
+# Encryption key for the users' data (Required)
+KEY=<32 bytes encoded in base64>
+
+# MySQL settings
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_NAME=lesjeunot
+DB_USER=lesjeunot
+DB_PASSWORD=<strong password>
 ```
 
 ### 6. Start the service in development mode
 
 > [!NOTE]
-> When first starting the project, it will create it's SQLite database on it's own.
+> A running MySQL instance matching the environment variables above is required.
 
 ```bash
 python3 main.py

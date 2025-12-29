@@ -1,121 +1,108 @@
-from flask_jwt_extended import jwt_required, get_jwt_identity
-from sqlite3 import connect as sqlconnect, Connection, Cursor
-from flask import request, jsonify 
+from flask import jsonify, request
+from flask_jwt_extended import get_jwt_identity, jwt_required
 from http import HTTPStatus
 from uuid import uuid4
 
+from sqlalchemy import delete as sql_delete, select
+
+from database import get_session
+from models import Ticket
 from modules.RESTful_Builder import Builder
 
 
-def send(code: int, response: dict = {}): return (jsonify({'status': code, 'data': response}), code) if response is not {} else (jsonify({'status': code}), code)
-def abort(code: int, message: str): return jsonify({'status': code, 'error': HTTPStatus(code).phrase, 'message': message}), code
+def send(code: int, response: dict | None = None):
+    payload = {"status": code}
+    if response is not None:
+        payload["data"] = response
+    return jsonify(payload), code
 
-def uuid() -> str: return uuid4().hex
+
+def abort(code: int, message: str):
+    return (
+        jsonify(
+            {"status": code, "error": HTTPStatus(code).phrase, "message": message}
+        ),
+        code,
+    )
 
 
-def connect() -> tuple[Connection, Cursor]:
-    con = sqlconnect('database.sqlite')
-    cur = con.cursor()
-    return (con, cur)
+def uuid() -> str:
+    return uuid4().hex
 
 
 @jwt_required()
 def getAll():
     identity = get_jwt_identity()
-    
-    query = """
-        SELECT
-            showing
-        FROM
-            tickets
-        WHERE
-            user = ?
-    """
-    con, cur = connect()
-    cur.execute(query, (identity,))
-    results = cur.fetchall()
-    
-    if len(results) < 1: return abort(404, f'No tickets were not found.')
-    
-    return send(200, {'showings': [x[0] for x in results]})
+
+    with get_session() as session:
+        showings = session.scalars(
+            select(Ticket.showing).where(Ticket.user_id == identity)
+        ).all()
+
+    if not showings:
+        return abort(404, "No tickets were found.")
+
+    return send(200, {"showings": showings})
+
 
 @jwt_required()
 def getOne(id: str):
     identity = get_jwt_identity()
-    
-    query = """
-        SELECT
-            showing
-        FROM
-            tickets
-        WHERE
-            uuid = ?
-        AND
-            user = ?
-    """
-    con, cur = connect()
-    cur.execute(query, (id, identity))
-    results = cur.fetchone()
-    
-    if len(results) < 1: return abort(404, f'The specified ticket was not found ({id})')
-    
-    return send(200, {'showing': results[0]})
+
+    with get_session() as session:
+        ticket = session.scalar(
+            select(Ticket).where(Ticket.uuid == id, Ticket.user_id == identity)
+        )
+
+    if ticket is None:
+        return abort(404, f"The specified ticket was not found ({id}).")
+
+    return send(200, {"showing": ticket.showing})
+
 
 @jwt_required()
 def create():
     identity = get_jwt_identity()
-    
-    showing = request.json.get('showing', None)
-    if showing is None: return abort(400, f'Missing value: showing')
 
-    id = uuid()
-    query = """
-        INSERT INTO tickets (
-            uuid,
-            showing,
-            user
-        ) values (?, ?, ?)
-    """
-    con, cur = connect()
-    cur.execute(query, (id, showing, identity))
-    con.commit()
-    
-    return send(200, {'message': 'Ticket successfully created.', 'uuid': id})
+    showing = request.json.get("showing")
+    if showing is None:
+        return abort(400, "Missing value: showing")
+
+    ticket = Ticket(uuid=uuid(), showing=showing, user_id=identity)
+    with get_session() as session:
+        session.add(ticket)
+
+    return send(201, {"message": "Ticket successfully created.", "uuid": ticket.uuid})
+
 
 @jwt_required()
 def delete(id: str | None = None):
     identity = get_jwt_identity()
-    
-    if id is not None:
-        query = """
-            DELETE FROM
-                tickets
-            WHERE
-                uuid = ?
-            AND
-                user = ?
-        """
-        con, cur = connect()
-        cur.execute(query, (id, identity))
-    else:
-        query = """
-            DELETE FROM
-                tickets
-            AND
-                user = ?
-        """
-        con, cur = connect()
-        cur.execute(query, (identity,))
-    con.commit()
-    
-    return send(200, {
-        'message': f'Ticket{("s" if id is not None else "")} successfully deleted.'
-    })
+
+    with get_session() as session:
+        if id is not None:
+            result = session.execute(
+                sql_delete(Ticket).where(
+                    Ticket.uuid == id,
+                    Ticket.user_id == identity,
+                )
+            )
+            if result.rowcount == 0:
+                return abort(404, f"Ticket {id} not found.")
+        else:
+            session.execute(
+                sql_delete(Ticket).where(
+                    Ticket.user_id == identity,
+                )
+            )
+
+    plural = "s" if id is None else ""
+    return send(200, {"message": f"Ticket{plural} successfully deleted."})
 
 
-bp = Builder('v1-tickets').bind(
-    getAll = getAll,
-    getOne = getOne,
-    create = create,
-    delete = delete
+bp = Builder("v1-tickets").bind(
+    getAll=getAll,
+    getOne=getOne,
+    create=create,
+    delete=delete,
 ).bp
