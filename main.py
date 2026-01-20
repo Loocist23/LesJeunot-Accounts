@@ -7,6 +7,7 @@ from werkzeug.exceptions import HTTPException
 
 from config import settings
 from database import Base, engine
+from models import Ticket, User  # ensure models register with metadata
 
 
 def create_app() -> Flask:

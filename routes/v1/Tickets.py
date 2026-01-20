@@ -1,3 +1,5 @@
+import json
+
 from flask import jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 from http import HTTPStatus
@@ -30,6 +32,21 @@ def uuid() -> str:
     return uuid4().hex
 
 
+def _serialize_showing(showing: dict | str) -> str:
+    if isinstance(showing, str):
+        return showing
+    return json.dumps(showing, separators=(",", ":"))
+
+
+def _deserialize_showing(showing: str | dict):
+    if not isinstance(showing, str):
+        return showing
+    try:
+        return json.loads(showing)
+    except json.JSONDecodeError:
+        return showing
+
+
 @jwt_required()
 def getAll():
     identity = get_jwt_identity()
@@ -38,6 +55,7 @@ def getAll():
         showings = session.scalars(
             select(Ticket.showing).where(Ticket.user_id == identity)
         ).all()
+        showings = [_deserialize_showing(showing) for showing in showings]
 
     if not showings:
         return abort(404, "No tickets were found.")
@@ -57,7 +75,7 @@ def getOne(id: str):
     if ticket is None:
         return abort(404, f"The specified ticket was not found ({id}).")
 
-    return send(200, {"showing": ticket.showing})
+    return send(200, {"showing": _deserialize_showing(ticket.showing)})
 
 
 @jwt_required()
@@ -67,12 +85,19 @@ def create():
     showing = request.json.get("showing")
     if showing is None:
         return abort(400, "Missing value: showing")
+    if not isinstance(showing, (dict, str)):
+        return abort(400, "Invalid value: showing")
 
-    ticket = Ticket(uuid=uuid(), showing=showing, user_id=identity)
+    ticket = Ticket(
+        uuid=uuid(),
+        showing=_serialize_showing(showing),
+        user_id=identity,
+    )
+    ticket_uuid = ticket.uuid
     with get_session() as session:
         session.add(ticket)
 
-    return send(201, {"message": "Ticket successfully created.", "uuid": ticket.uuid})
+    return send(201, {"message": "Ticket successfully created.", "uuid": ticket_uuid})
 
 
 @jwt_required()
