@@ -152,6 +152,37 @@ Example 400 response:
 }
 ```
 ---
+`GET /<version>/user` Get all users (admin only).
+<br>
+**Authorization header required** `Authorization: Bearer <access token>`
+<br>
+Example 200 response:
+```json
+{
+    "status": 200,
+    "data": {
+        "users": [
+            {
+                "uuid": "<uuid>",
+                "lastname": "<lastname>",
+                "firstname": "<firstname>",
+                "age": "<age>",
+                "email": "<email>",
+                "role": "<role>"
+            }
+        ]
+    }
+}
+```
+Example 403 response:
+```json
+{
+    "status": 403,
+    "error": "Forbidden",
+    "message": "Admin role required."
+}
+```
+---
 `POST /<version>/user/login` Log in a User.
 <br>
 Body:
@@ -308,6 +339,34 @@ Example 200 response:
     "data": {
         "showings": [<list of string of the showing values>]
     }
+}
+```
+---
+`GET /<version>/ticket?scope=all` Get every ticket (admin only).
+<br>
+**Authorization header required** `Authorization: Bearer <access token>`
+<br>
+Example 200 response:
+```json
+{
+    "status": 200,
+    "data": {
+        "tickets": [
+            {
+                "uuid": "<ticket uuid>",
+                "user_id": "<owner uuid>",
+                "showing": "<showing value or JSON>"
+            }
+        ]
+    }
+}
+```
+Example 403 response:
+```json
+{
+    "status": 403,
+    "error": "Forbidden",
+    "message": "Admin role required."
 }
 ```
 ---

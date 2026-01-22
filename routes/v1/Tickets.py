@@ -8,7 +8,7 @@ from uuid import uuid4
 from sqlalchemy import delete as sql_delete, select
 
 from database import get_session
-from models import Ticket
+from models import Ticket, User
 from modules.RESTful_Builder import Builder
 
 
@@ -50,8 +50,27 @@ def _deserialize_showing(showing: str | dict):
 @jwt_required()
 def getAll():
     identity = get_jwt_identity()
+    scope = request.args.get("scope")
 
     with get_session() as session:
+        if scope == "all":
+            current = session.get(User, identity)
+            if current is None:
+                return abort(404, "User not found.")
+            if current.role != "admin":
+                return abort(403, "Admin role required.")
+
+            tickets = session.execute(select(Ticket)).scalars().all()
+            reservations = [
+                {
+                    "uuid": ticket.uuid,
+                    "user_id": ticket.user_id,
+                    "showing": _deserialize_showing(ticket.showing),
+                }
+                for ticket in tickets
+            ]
+            return send(200, {"tickets": reservations})
+
         showings = session.scalars(
             select(Ticket.showing).where(Ticket.user_id == identity)
         ).all()

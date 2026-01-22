@@ -64,9 +64,11 @@ def _get_cipher() -> Fernet:
     return Fernet(KEY.encode("utf-8"))
 
 
-def encrypt(message: str) -> str:
+def encrypt(message: str | int | float | bool) -> str:
+    """Encrypt values by casting them to strings first."""
     cipher = _get_cipher()
-    return cipher.encrypt(message.encode("utf-8")).decode("utf-8")
+    plaintext = str(message)
+    return cipher.encrypt(plaintext.encode("utf-8")).decode("utf-8")
 
 
 def decrypt(message: str) -> str | None:
@@ -75,6 +77,36 @@ def decrypt(message: str) -> str | None:
         return cipher.decrypt(message.encode("utf-8")).decode("utf-8")
     except InvalidToken:
         return None
+
+
+def _format_user(user: User) -> dict[str, str | None]:
+    return {
+        "uuid": user.uuid,
+        "lastname": decrypt(user.lastname),
+        "firstname": decrypt(user.firstname),
+        "age": decrypt(user.age),
+        "email": decrypt(user.email),
+        "role": user.role,
+    }
+
+
+@jwt_required()
+def getAll():
+    identity = get_jwt_identity()
+
+    with get_session() as session:
+        current = session.get(User, identity)
+        if current is None:
+            return abort(404, "User not found.")
+        if current.role != "admin":
+            return abort(403, "Admin role required.")
+
+        users = [
+            _format_user(user)
+            for user in session.execute(select(User)).scalars().all()
+        ]
+
+    return send(200, {"users": users})
 
 
 @jwt_required()
@@ -86,16 +118,7 @@ def getMe():
         if user is None:
             return abort(404, "User not found.")
 
-        return send(
-            200,
-            {
-                "lastname": decrypt(user.lastname),
-                "firstname": decrypt(user.firstname),
-                "age": decrypt(user.age),
-                "email": decrypt(user.email),
-                "role": user.role,
-            },
-        )
+        return send(200, _format_user(user))
 
 
 def create():
@@ -104,6 +127,7 @@ def create():
     age = request.json.get("age")
     email = request.json.get("email")
     password = request.json.get("password")
+    role = request.json.get("role", "user")
 
     data = {
         "lastname": lastname,
@@ -116,8 +140,10 @@ def create():
     if missing:
         return abort(400, f"Missing value(s): [{', '.join(missing)}]")
 
+    if role not in {"user", "admin"}:
+        return abort(400, "Invalid role. Allowed values: 'user', 'admin'.")
+
     email_clean = email.strip()  # type: ignore[union-attr]
-    role = "admin" if email_clean.endswith("@shadoweb.fr") else "user"
     email_hash = sha256(email_clean.lower().encode("utf-8")).hexdigest()
 
     with get_session() as session:
@@ -143,7 +169,7 @@ def create():
 
 
 @jwt_required()
-def modify():
+def modify(_id: str | None = None):
     identity = get_jwt_identity()
 
     lastname = request.json.get("lastname")
@@ -151,6 +177,7 @@ def modify():
     age = request.json.get("age")
     email = request.json.get("email")
     password = request.json.get("password")
+    role = request.json.get("role")
 
     updates: dict[str, str] = {}
     if lastname is not None:
@@ -165,9 +192,12 @@ def modify():
             email_clean.lower().encode("utf-8")
         ).hexdigest()
         updates["email"] = encrypt(email_clean)
-        updates["role"] = "admin" if email_clean.endswith("@shadoweb.fr") else "user"
     if password is not None:
         updates["password"] = HASHER.hash(password)
+    if role is not None:
+        if role not in {"user", "admin"}:
+            return abort(400, "Invalid role. Allowed values: 'user', 'admin'.")
+        updates["role"] = role
 
     if not updates:
         return abort(400, "At least one field is required.")
@@ -252,6 +282,7 @@ def refresh():
 bp = Builder("v1-users").bind(
     login=login,
     refresh=refresh,
+    getAll=getAll,
     getMe=getMe,
     create=create,
     modify=modify,
